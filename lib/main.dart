@@ -29,7 +29,6 @@ class _ProCalculatorAppState extends State<ProCalculatorApp> {
 }
 
 /* ---------- THEMES ---------- */
-
 final darkTheme = ThemeData.dark().copyWith(
   scaffoldBackgroundColor: const Color(0xFF0B0F1A),
   primaryColor: Colors.blueAccent,
@@ -41,7 +40,6 @@ final lightTheme = ThemeData.light().copyWith(
 );
 
 /* ---------- CALCULATOR ---------- */
-
 class CalculatorPage extends StatefulWidget {
   final bool darkMode;
   final VoidCallback onToggleTheme;
@@ -60,44 +58,40 @@ class _CalculatorPageState extends State<CalculatorPage> {
   double precioCompra = 1.00;
   int contratos = 1;
   double comision = 0.65;
-  double gananciaPorc = 0.10;
+  double gananciaPorc = 0.10; // slider objetivo ya corregido
   double stopPorc = 0.20;
 
   final int multiplicador = 100;
 
   double precioVenta = 0;
   double gananciaNeta = 0;
-  double porcentajeReal = 0;
+  double porcentajeReal = 0; // ya no se usa para mostrar
   double stopPrice = 0;
+  double perdidaNeta = 0;
 
   void calcular() {
     double valorTotal = precioCompra * multiplicador * contratos;
     double comisionesTotales = comision * contratos * 2;
 
-    double objetivoNeto =
-        (valorTotal + comisionesTotales) * (1 + gananciaPorc);
+    // Precio de venta redondeado
+    double precioVentaExacto =
+        (valorTotal + comisionesTotales) * (1 + gananciaPorc) / (contratos * multiplicador);
+    precioVenta = (precioVentaExacto * 100).ceilToDouble() / 100;
 
-    // SALE PRICE redondeado hacia arriba
-    precioVenta = (objetivoNeto / (contratos * multiplicador) * 100)
-            .ceilToDouble() /
-        100;
+    // Stop Loss
+    stopPrice = (precioCompra * (1 - stopPorc) * 100).ceilToDouble() / 100;
 
-    // STOP LOSS
-    double rawStop = precioCompra * (1 - stopPorc);
-    stopPrice = (rawStop * 100).ceilToDouble() / 100;
-
-    // NET PROFIT basado en precio redondeado
+    // Ganancia neta real
     double ventaReal = precioVenta * contratos * multiplicador;
-
     gananciaNeta = ventaReal - valorTotal - comisionesTotales;
 
-    porcentajeReal =
-        (gananciaNeta / (valorTotal + comisionesTotales)) * 100;
+    // Pérdida neta si se llega al stop
+    double stopReal = stopPrice * contratos * multiplicador;
+    perdidaNeta = valorTotal - stopReal + comisionesTotales;
   }
 
   Widget glassCard(Widget child) {
     final isDark = widget.darkMode;
-
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(16),
@@ -108,17 +102,10 @@ class _CalculatorPageState extends State<CalculatorPage> {
               ? [Colors.white.withOpacity(0.06), Colors.white.withOpacity(0.02)]
               : [Colors.white, Colors.grey.shade100],
         ),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.black12,
-        ),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
         boxShadow: isDark
             ? []
-            : [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                )
-              ],
+            : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
       ),
       child: child,
     );
@@ -230,6 +217,102 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
+  // --------- MINI GRAPH MODIFICADO ----------
+  Widget miniGraph() {
+    // Tomamos el máximo absoluto para escalar proporciones
+    double maxValue = [
+      stopPrice,
+      precioCompra,
+      precioVenta,
+      gananciaNeta.abs(),
+      perdidaNeta.abs()
+    ].reduce((a, b) => a > b ? a : b);
+
+    const double minHeight = 20; // altura mínima para que no desaparezcan
+
+    // Función para escalar cada valor respetando la proporción pero con mínimo
+    double getBarHeight(double value) {
+      double scaled = (value / maxValue) * 100;
+      return scaled < minHeight ? minHeight : scaled;
+    }
+
+    return glassCard(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Price Levels",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              // Stop
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(stopPrice),
+                      width: 20,
+                      color: Colors.orangeAccent),
+                  const SizedBox(height: 4),
+                  Text("Stop\n\$${stopPrice.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              // Buy
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(precioCompra),
+                      width: 20,
+                      color: Colors.grey),
+                  const SizedBox(height: 4),
+                  Text("Buy\n\$${precioCompra.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              // Sale
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(precioVenta),
+                      width: 20,
+                      color: Colors.blueAccent),
+                  const SizedBox(height: 4),
+                  Text("Sale\n\$${precioVenta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              // Net Profit
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(gananciaNeta.abs()),
+                      width: 20,
+                      color: Colors.greenAccent),
+                  const SizedBox(height: 4),
+                  Text("Profit\n\$${gananciaNeta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              // Posible pérdida
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(perdidaNeta.abs()),
+                      width: 20,
+                      color: Colors.redAccent),
+                  const SizedBox(height: 4),
+                  Text("Loss\n-\$${perdidaNeta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     calcular();
@@ -295,6 +378,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
               onChanged: (v) => setState(() => stopPorc = v / 100),
             ),
             const SizedBox(height: 24),
+            miniGraph(),
+            const SizedBox(height: 24),
             animatedResult(
               "Sale Price",
               "\$${precioVenta.toStringAsFixed(2)}",
@@ -311,11 +396,15 @@ class _CalculatorPageState extends State<CalculatorPage> {
               gananciaNeta >= 0 ? Colors.greenAccent : Colors.redAccent,
             ),
             animatedResult(
+              "Possible Loss",
+              "-\$${perdidaNeta.toStringAsFixed(2)}",
+              Colors.redAccent,
+            ),
+            // Ahora mostramos el porcentaje EXACTO del slider
+            animatedResult(
               "Percentage",
-              "${porcentajeReal.toStringAsFixed(2)}%",
-              porcentajeReal >= gananciaPorc * 100
-                  ? Colors.greenAccent
-                  : Colors.redAccent,
+              "${(gananciaPorc * 100).toStringAsFixed(2)}%",
+              gananciaNeta >= 0 ? Colors.greenAccent : Colors.redAccent,
             ),
             const SizedBox(height: 12),
             const Text("Designed by: Ransel Ramos"),
