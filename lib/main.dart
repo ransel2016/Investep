@@ -57,24 +57,42 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class _CalculatorPageState extends State<CalculatorPage> {
-  double precioCompra = 0.50;
+  double precioCompra = 1.00;
   int contratos = 1;
   double comision = 0.65;
   double gananciaPorc = 0.10;
+  double stopPorc = 0.20;
+
   final int multiplicador = 100;
 
   double precioVenta = 0;
   double gananciaNeta = 0;
   double porcentajeReal = 0;
+  double stopPrice = 0;
 
   void calcular() {
     double valorTotal = precioCompra * multiplicador * contratos;
     double comisionesTotales = comision * contratos * 2;
-    double objetivoNeto = (valorTotal + comisionesTotales) * (1 + gananciaPorc);
 
-    precioVenta = (objetivoNeto / (contratos * multiplicador) * 100).ceilToDouble() / 100;
-    gananciaNeta = objetivoNeto - valorTotal - comisionesTotales;
-    porcentajeReal = (gananciaNeta / (valorTotal + comisionesTotales)) * 100;
+    double objetivoNeto =
+        (valorTotal + comisionesTotales) * (1 + gananciaPorc);
+
+    // SALE PRICE redondeado hacia arriba
+    precioVenta = (objetivoNeto / (contratos * multiplicador) * 100)
+            .ceilToDouble() /
+        100;
+
+    // STOP LOSS
+    double rawStop = precioCompra * (1 - stopPorc);
+    stopPrice = (rawStop * 100).ceilToDouble() / 100;
+
+    // NET PROFIT basado en precio redondeado
+    double ventaReal = precioVenta * contratos * multiplicador;
+
+    gananciaNeta = ventaReal - valorTotal - comisionesTotales;
+
+    porcentajeReal =
+        (gananciaNeta / (valorTotal + comisionesTotales)) * 100;
   }
 
   Widget glassCard(Widget child) {
@@ -236,9 +254,9 @@ class _CalculatorPageState extends State<CalculatorPage> {
             sliderControl(
               label: "Trade Price:",
               value: precioCompra,
-              min: 0.01,
-              max: 100,
-              step: 0.01,
+              min: 0.20,
+              max: 4.00,
+              step: 0.05,
               prefix: "\$",
               onChanged: (v) => setState(() => precioCompra = v),
             ),
@@ -253,7 +271,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
               label: "Commission:",
               value: comision,
               min: 0,
-              max: 10,
+              max: 20,
               step: 0.05,
               prefix: "\$",
               onChanged: (v) => setState(() => comision = v),
@@ -267,6 +285,15 @@ class _CalculatorPageState extends State<CalculatorPage> {
               suffix: "%",
               onChanged: (v) => setState(() => gananciaPorc = v / 100),
             ),
+            sliderControl(
+              label: "Stop Loss:",
+              value: stopPorc * 100,
+              min: 0,
+              max: 100,
+              step: 1,
+              suffix: "%",
+              onChanged: (v) => setState(() => stopPorc = v / 100),
+            ),
             const SizedBox(height: 24),
             animatedResult(
               "Sale Price",
@@ -274,8 +301,13 @@ class _CalculatorPageState extends State<CalculatorPage> {
               Colors.blueAccent,
             ),
             animatedResult(
+              "Stop Price",
+              "\$${stopPrice.toStringAsFixed(2)}",
+              Colors.orangeAccent,
+            ),
+            animatedResult(
               "Net Profit",
-              "\$${gananciaNeta.toInt()}",
+              "\$${gananciaNeta.toStringAsFixed(2)}",
               gananciaNeta >= 0 ? Colors.greenAccent : Colors.redAccent,
             ),
             animatedResult(
