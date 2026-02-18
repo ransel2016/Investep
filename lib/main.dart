@@ -55,25 +55,37 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class _CalculatorPageState extends State<CalculatorPage> {
+  // ----- VALORES INICIALES -----
+  final double initialPrecioCompra = 1.00;
+  final int initialContratos = 1;
+  final double initialComision = 0.65;
+  final double initialGananciaPorc = 0.10;
+  final double initialStopPorc = 0.20;
+
+  // ----- VARIABLES DINÁMICAS -----
   double precioCompra = 1.00;
   int contratos = 1;
   double comision = 0.65;
-  double gananciaPorc = 0.10; // slider objetivo ya corregido
+  double gananciaPorc = 0.10;
   double stopPorc = 0.20;
 
   final int multiplicador = 100;
 
   double precioVenta = 0;
   double gananciaNeta = 0;
-  double porcentajeReal = 0; // ya no se usa para mostrar
   double stopPrice = 0;
   double perdidaNeta = 0;
+
+  // ---- CHECKBOX ----
+  bool disableCommission = true;
+  bool disableProfitTarget = true;
+  bool disableStopLoss = true;
 
   void calcular() {
     double valorTotal = precioCompra * multiplicador * contratos;
     double comisionesTotales = comision * contratos * 2;
 
-    // Precio de venta redondeado
+    // Precio de venta
     double precioVentaExacto =
         (valorTotal + comisionesTotales) * (1 + gananciaPorc) / (contratos * multiplicador);
     precioVenta = (precioVentaExacto * 100).ceilToDouble() / 100;
@@ -90,6 +102,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
     perdidaNeta = valorTotal - stopReal + comisionesTotales;
   }
 
+  // ----- GLASS CARD -----
   Widget glassCard(Widget child) {
     final isDark = widget.darkMode;
     return Container(
@@ -111,6 +124,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
+  // ----- SLIDER CONTROL -----
   Widget sliderControl({
     required String label,
     required double value,
@@ -120,33 +134,174 @@ class _CalculatorPageState extends State<CalculatorPage> {
     required Function(double) onChanged,
     String prefix = "",
     String suffix = "",
+    bool enabled = true,
+    bool showCheckbox = false,
   }) {
+    final bool locked = !enabled;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 300),
+      opacity: locked ? 0.55 : 1.0,
+      child: glassCard(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // ✅ Mostrar siempre .00 excepto Quantity
+                Text(
+                  "$label  $prefix${label == "Quantity:" ? value.toInt() : value.toStringAsFixed(2)}$suffix",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: locked
+                      ? const Text(
+                          "LOCKED",
+                          key: ValueKey("locked"),
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
+                      : const SizedBox(key: ValueKey("unlocked")),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove),
+                  onPressed: enabled
+                      ? () => onChanged((value - step).clamp(min, max))
+                      : null,
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: enabled ? Colors.blueAccent : Colors.grey,
+                      inactiveTrackColor: Colors.grey.shade400,
+                      thumbColor: enabled ? Colors.blueAccent : Colors.grey,
+                    ),
+                    child: Slider(
+                      value: value,
+                      min: min,
+                      max: max,
+                      divisions: ((max - min) / step).round(),
+                      onChanged: enabled ? onChanged : null,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: enabled
+                      ? () => onChanged((value + step).clamp(min, max))
+                      : null,
+                ),
+                if (showCheckbox)
+                  Checkbox(
+                    value: locked,
+                    onChanged: (v) {
+                      setState(() {
+                        if (label.contains("Commission")) {
+                          disableCommission = v!;
+                        } else if (label.contains("Profit Target")) {
+                          disableProfitTarget = v!;
+                        } else if (label.contains("Stop Loss")) {
+                          disableStopLoss = v!;
+                        }
+                      });
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ----- MINI GRAPH -----
+  Widget miniGraph() {
+    double maxValue = [
+      stopPrice,
+      precioCompra,
+      precioVenta,
+      gananciaNeta.abs(),
+      perdidaNeta.abs()
+    ].reduce((a, b) => a > b ? a : b);
+
+    const double minHeight = 20;
+    double getBarHeight(double value) {
+      double scaled = (value / maxValue) * 100;
+      return scaled < minHeight ? minHeight : scaled;
+    }
+
     return glassCard(
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "$label  $prefix${value.toStringAsFixed(2)}$suffix",
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
+          const Text("Price Levels",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              IconButton(
-                icon: const Icon(Icons.remove),
-                onPressed: () => onChanged((value - step).clamp(min, max)),
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(precioCompra),
+                      width: 20,
+                      color: Colors.grey),
+                  const SizedBox(height: 4),
+                  Text("Buy\n\$${precioCompra.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
               ),
-              Expanded(
-                child: Slider(
-                  value: value,
-                  min: min,
-                  max: max,
-                  divisions: ((max - min) / step).round(),
-                  onChanged: onChanged,
-                ),
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(precioVenta),
+                      width: 20,
+                      color: Colors.blueAccent),
+                  const SizedBox(height: 4),
+                  Text("Sale\n\$${precioVenta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: () => onChanged((value + step).clamp(min, max)),
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(stopPrice),
+                      width: 20,
+                      color: Colors.orangeAccent),
+                  const SizedBox(height: 4),
+                  Text("Stop\n\$${stopPrice.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(gananciaNeta.abs()),
+                      width: 20,
+                      color: Colors.greenAccent),
+                  const SizedBox(height: 4),
+                  Text("Profit\n\$${gananciaNeta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
+              ),
+              Column(
+                children: [
+                  Container(
+                      height: getBarHeight(perdidaNeta.abs()),
+                      width: 20,
+                      color: Colors.redAccent),
+                  const SizedBox(height: 4),
+                  Text("Loss\n-\$${perdidaNeta.toStringAsFixed(2)}",
+                      textAlign: TextAlign.center),
+                ],
               ),
             ],
           ),
@@ -155,45 +310,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
-  Widget intSlider({
-    required String label,
-    required int value,
-    required int min,
-    required int max,
-    required Function(int) onChanged,
-  }) {
-    return glassCard(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("$label  $value",
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.remove),
-                onPressed: () => onChanged((value - 1).clamp(min, max)),
-              ),
-              Expanded(
-                child: Slider(
-                  value: value.toDouble(),
-                  min: min.toDouble(),
-                  max: max.toDouble(),
-                  divisions: max - min,
-                  onChanged: (v) => onChanged(v.toInt()),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: () => onChanged((value + 1).clamp(min, max)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ----- ANIMATED RESULT -----
   Widget animatedResult(String label, String value, Color color) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
@@ -217,100 +334,19 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
-  // --------- MINI GRAPH MODIFICADO ----------
-  Widget miniGraph() {
-    // Tomamos el máximo absoluto para escalar proporciones
-    double maxValue = [
-      stopPrice,
-      precioCompra,
-      precioVenta,
-      gananciaNeta.abs(),
-      perdidaNeta.abs()
-    ].reduce((a, b) => a > b ? a : b);
+  // ----- RESET FUNCTION -----
+  void resetValues() {
+    setState(() {
+      precioCompra = initialPrecioCompra;
+      contratos = initialContratos;
+      comision = initialComision;
+      gananciaPorc = initialGananciaPorc;
+      stopPorc = initialStopPorc;
 
-    const double minHeight = 20; // altura mínima para que no desaparezcan
-
-    // Función para escalar cada valor respetando la proporción pero con mínimo
-    double getBarHeight(double value) {
-      double scaled = (value / maxValue) * 100;
-      return scaled < minHeight ? minHeight : scaled;
-    }
-
-    return glassCard(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Price Levels",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              // Stop
-              Column(
-                children: [
-                  Container(
-                      height: getBarHeight(stopPrice),
-                      width: 20,
-                      color: Colors.orangeAccent),
-                  const SizedBox(height: 4),
-                  Text("Stop\n\$${stopPrice.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
-                ],
-              ),
-              // Buy
-              Column(
-                children: [
-                  Container(
-                      height: getBarHeight(precioCompra),
-                      width: 20,
-                      color: Colors.grey),
-                  const SizedBox(height: 4),
-                  Text("Buy\n\$${precioCompra.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
-                ],
-              ),
-              // Sale
-              Column(
-                children: [
-                  Container(
-                      height: getBarHeight(precioVenta),
-                      width: 20,
-                      color: Colors.blueAccent),
-                  const SizedBox(height: 4),
-                  Text("Sale\n\$${precioVenta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
-                ],
-              ),
-              // Net Profit
-              Column(
-                children: [
-                  Container(
-                      height: getBarHeight(gananciaNeta.abs()),
-                      width: 20,
-                      color: Colors.greenAccent),
-                  const SizedBox(height: 4),
-                  Text("Profit\n\$${gananciaNeta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
-                ],
-              ),
-              // Posible pérdida
-              Column(
-                children: [
-                  Container(
-                      height: getBarHeight(perdidaNeta.abs()),
-                      width: 20,
-                      color: Colors.redAccent),
-                  const SizedBox(height: 4),
-                  Text("Loss\n-\$${perdidaNeta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
+      disableCommission = true;
+      disableProfitTarget = true;
+      disableStopLoss = true;
+    });
   }
 
   @override
@@ -327,7 +363,12 @@ class _CalculatorPageState extends State<CalculatorPage> {
           IconButton(
             icon: Icon(widget.darkMode ? Icons.light_mode : Icons.dark_mode),
             onPressed: widget.onToggleTheme,
-          )
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: "Reset",
+            onPressed: resetValues,
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -339,16 +380,19 @@ class _CalculatorPageState extends State<CalculatorPage> {
               value: precioCompra,
               min: 0.20,
               max: 4.00,
-              step: 0.05,
+              step: 0.01,
               prefix: "\$",
               onChanged: (v) => setState(() => precioCompra = v),
+              showCheckbox: false,
             ),
-            intSlider(
+            sliderControl(
               label: "Quantity:",
-              value: contratos,
+              value: contratos.toDouble(),
               min: 1,
               max: 1000,
-              onChanged: (v) => setState(() => contratos = v),
+              step: 1,
+              onChanged: (v) => setState(() => contratos = v.toInt()),
+              showCheckbox: false,
             ),
             sliderControl(
               label: "Commission:",
@@ -357,6 +401,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
               max: 20,
               step: 0.05,
               prefix: "\$",
+              enabled: !disableCommission,
+              showCheckbox: true,
               onChanged: (v) => setState(() => comision = v),
             ),
             sliderControl(
@@ -366,6 +412,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
               max: 100,
               step: 1,
               suffix: "%",
+              enabled: !disableProfitTarget,
+              showCheckbox: true,
               onChanged: (v) => setState(() => gananciaPorc = v / 100),
             ),
             sliderControl(
@@ -375,6 +423,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
               max: 100,
               step: 1,
               suffix: "%",
+              enabled: !disableStopLoss,
+              showCheckbox: true,
               onChanged: (v) => setState(() => stopPorc = v / 100),
             ),
             const SizedBox(height: 24),
@@ -400,7 +450,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
               "-\$${perdidaNeta.toStringAsFixed(2)}",
               Colors.redAccent,
             ),
-            // Ahora mostramos el porcentaje EXACTO del slider
             animatedResult(
               "Percentage",
               "${(gananciaPorc * 100).toStringAsFixed(2)}%",
