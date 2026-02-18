@@ -55,15 +55,33 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class _CalculatorPageState extends State<CalculatorPage> {
+  // ----- Tickers y rangos -----
+  final Map<String, List<double>> tickers = {
+    "AMZN": [0.65, 1.30],
+    "AAPL": [0.45, 0.95],
+    "GOOG": [0.60, 1.40],
+    "META": [0.50, 1.70],
+    "MSFT": [0.70, 1.55],
+    "NFLX": [0.55, 0.85],
+    "TSLA": [2.20, 3.60],
+    "AMD": [0.65, 1.40],
+    "NVDA": [0.80, 1.70],
+    "QQQ": [0.30, 0.60],
+    "SPY": [0.30, 0.45],
+    "CCL": [0.25, 0.45],
+    "RCL": [0.80, 1.40],
+  };
+
+  String selectedTicker = "AMZN";
+
   // ----- VALORES INICIALES -----
-  final double initialPrecioCompra = 1.00;
-  final int initialContratos = 1;
   final double initialComision = 0.65;
   final double initialGananciaPorc = 0.10;
   final double initialStopPorc = 0.20;
+  final int initialContratos = 1;
 
   // ----- VARIABLES DINÁMICAS -----
-  double precioCompra = 1.00;
+  double precioCompra = 0.65; // inicializa con el mínimo de AMZN
   int contratos = 1;
   double comision = 0.65;
   double gananciaPorc = 0.10;
@@ -149,7 +167,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // ✅ Mostrar siempre .00 excepto Quantity
                 Text(
                   "$label  $prefix${label == "Quantity:" ? value.toInt() : value.toStringAsFixed(2)}$suffix",
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -337,7 +354,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
   // ----- RESET FUNCTION -----
   void resetValues() {
     setState(() {
-      precioCompra = initialPrecioCompra;
+      // Reset sliders al inicio
+      precioCompra = tickers[selectedTicker]![0]; // al mínimo del ticker
       contratos = initialContratos;
       comision = initialComision;
       gananciaPorc = initialGananciaPorc;
@@ -375,11 +393,98 @@ class _CalculatorPageState extends State<CalculatorPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // ---------- BOTÓN TICKERS ESTILIZADO ----------
+            glassCard(
+              GestureDetector(
+                onTap: () async {
+                  String? result = await showModalBottomSheet<String>(
+                    context: context,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    builder: (context) {
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        height: 400,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "Select a Ticker",
+                              style: TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: ListView(
+                                children: tickers.keys.map((ticker) {
+                                  return ListTile(
+                                    title: Text(
+                                      ticker,
+                                      style: const TextStyle(fontSize: 18),
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context, ticker);
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                  if (result != null) {
+                    setState(() {
+                      selectedTicker = result;
+                      precioCompra = tickers[selectedTicker]![0];
+                    });
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    gradient: LinearGradient(
+                      colors: widget.darkMode
+                          ? [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.02)]
+                          : [Colors.blue.shade100, Colors.blue.shade50],
+                    ),
+                    border: Border.all(
+                        color: widget.darkMode ? Colors.white24 : Colors.blueAccent),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        selectedTicker,
+                        style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: widget.darkMode ? Colors.white : Colors.black),
+                      ),
+                      const Icon(Icons.arrow_drop_down, size: 30),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ---------- SLIDERS ----------
             sliderControl(
               label: "Trade Price:",
               value: precioCompra,
-              min: 0.20,
-              max: 4.00,
+              min: tickers[selectedTicker]![0],
+              max: tickers[selectedTicker]![1],
               step: 0.01,
               prefix: "\$",
               onChanged: (v) => setState(() => precioCompra = v),
@@ -427,8 +532,10 @@ class _CalculatorPageState extends State<CalculatorPage> {
               showCheckbox: true,
               onChanged: (v) => setState(() => stopPorc = v / 100),
             ),
+
             const SizedBox(height: 24),
             miniGraph(),
+
             const SizedBox(height: 24),
             animatedResult(
               "Sale Price",
