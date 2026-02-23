@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:csv/csv.dart';
@@ -98,6 +100,49 @@ class _CalculatorPageState extends State<CalculatorPage> {
   void initState() {
     super.initState();
     loadEmpresas();
+  }
+
+  final Map<int, List<DateTime>> fomcDates = {
+    2026: [
+      DateTime(2026, 1, 28),
+      DateTime(2026, 3, 18),
+      DateTime(2026, 4, 29),
+      DateTime(2026, 6, 17),
+      DateTime(2026, 7, 29),
+      DateTime(2026, 9, 16),
+      DateTime(2026, 10, 28),
+      DateTime(2026, 12, 9),
+    ],
+    2027: [
+      DateTime(2027, 1, 27),
+      DateTime(2027, 3, 17),
+      DateTime(2027, 4, 28),
+      DateTime(2027, 6, 9),
+      DateTime(2027, 7, 28),
+      DateTime(2027, 9, 15),
+      DateTime(2027, 10, 27),
+      DateTime(2027, 12, 8),
+    ],
+  };
+  String getNextFomcDate() {
+    final now = DateTime.now();
+    final dates = fomcDates[now.year] ?? [];
+
+    for (final date in dates) {
+      if (date.isAfter(now) || date.isAtSameMomentAs(now)) {
+        return "${_monthName(date.month)} ${date.day}, ${date.year}";
+      }
+    }
+
+    // Si ya pasaron todas las de este año, mostrar la primera del siguiente
+    final nextYear = now.year + 1;
+    final nextDates = fomcDates[nextYear] ?? [];
+    if (nextDates.isNotEmpty) {
+      final date = nextDates.first;
+      return "${_monthName(date.month)} ${date.day}, ${date.year}";
+    }
+
+    return "N/A";
   }
 
   Future<Map<String, String>?> fetchEarningsDate(String ticker) async {
@@ -628,6 +673,75 @@ class _CalculatorPageState extends State<CalculatorPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // ------------------ Banner FOMC ------------------
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Builder(
+                    builder: (context) {
+                      final theme = Theme.of(context).brightness;
+                      return Container(
+                        padding: EdgeInsets.symmetric(
+                          vertical: theme == Brightness.dark ? 12 : 10,
+                          horizontal: theme == Brightness.dark ? 16 : 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme == Brightness.dark
+                              ? Colors.white.withOpacity(0.15)
+                              : Colors.black.withOpacity(
+                                  0.05,
+                                ), // fondo más claro en tema claro
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme == Brightness.dark
+                                ? Colors.white.withOpacity(0.2)
+                                : Colors.black12,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          "Next FOMC: ${getNextFomcDate()}",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: theme == Brightness.dark
+                                ? Colors.white
+                                : Colors.black87,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            shadows: [
+                              Shadow(
+                                color: theme == Brightness.dark
+                                    ? Colors.black26
+                                    : Colors.black12,
+                                blurRadius: 3,
+                                offset: const Offset(0, 1),
+                              ),
+                              Shadow(
+                                color: theme == Brightness.dark
+                                    ? Colors.white10
+                                    : Colors.white24,
+                                blurRadius: 1,
+                                offset: const Offset(0, 0),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+
             // ---------- BUSCADOR DE EMPRESAS ----------
             glassCard(
               Padding(
