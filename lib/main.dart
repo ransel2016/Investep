@@ -606,7 +606,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                   controller: controller,
                                   focusNode: focusNode,
                                   decoration: const InputDecoration(
-                                    labelText: "Buscar empresa...",
+                                    labelText: "Search Tickers...",
                                     border: OutlineInputBorder(),
                                   ),
                                 );
