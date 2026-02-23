@@ -599,58 +599,86 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                 isETF = result["isETF"];
                               });
                             },
-                            fieldViewBuilder:
-                                (
-                                  context,
-                                  controller,
-                                  focusNode,
-                                  onEditingComplete,
-                                ) {
-                                  final isDark =
-                                      Theme.of(context).brightness ==
-                                      Brightness.dark;
+                            optionsViewBuilder: (context, onSelected, options) {
+                              final isDark =
+                                  Theme.of(context).brightness ==
+                                  Brightness.dark;
 
-                                  return TextField(
-                                    controller: controller,
-                                    focusNode: focusNode,
-                                    style: TextStyle(
-                                      fontSize: 16,
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: Container(
+                                    margin: const EdgeInsets.only(top: 8),
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 250,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(20),
                                       color: isDark
-                                          ? Colors.white
-                                          : Colors.black,
+                                          ? const Color(0xFF1E1E1E)
+                                          : Colors.white,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.15),
+                                          blurRadius: 20,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
                                     ),
-                                    cursorColor: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    decoration: InputDecoration(
-                                      hintText: "Search Tickers...",
-                                      hintStyle: TextStyle(
-                                        color: isDark
-                                            ? Colors.white54
-                                            : Colors.black45,
+                                    child: ListView.builder(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
                                       ),
-                                      prefixIcon: Icon(
-                                        Icons.search,
-                                        color: isDark
-                                            ? Colors.white70
-                                            : Colors.black54,
-                                      ),
-                                      filled: true,
-                                      fillColor: isDark
-                                          ? Colors.white.withOpacity(0.08)
-                                          : Colors.black.withOpacity(0.05),
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            vertical: 18,
-                                            horizontal: 20,
+                                      itemCount: options.length,
+                                      itemBuilder: (context, index) {
+                                        final option = options.elementAt(index);
+                                        final rango = rangosEmpresas[option];
+
+                                        return InkWell(
+                                          onTap: () => onSelected(option),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 18,
+                                              vertical: 14,
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                // 🔹 TICKER
+                                                Text(
+                                                  option,
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+
+                                                // 🔹 RANGO DE PRECIO
+                                                if (rango != null)
+                                                  Text(
+                                                    "\$${(rango[0] * 100).toStringAsFixed(2)}"
+                                                    " - "
+                                                    "\$${(rango[1] * 100).toStringAsFixed(2)}",
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: isDark
+                                                          ? Colors.white70
+                                                          : Colors.black54,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
                                           ),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(18),
-                                        borderSide: BorderSide.none,
-                                      ),
+                                        );
+                                      },
                                     ),
-                                  );
-                                },
+                                  ),
+                                ),
+                              );
+                            },
                           ),
 
                     if (seleccionada != null)
