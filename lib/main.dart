@@ -565,117 +565,175 @@ class _CalculatorPageState extends State<CalculatorPage> {
           children: [
             // ---------- BUSCADOR DE EMPRESAS ----------
             glassCard(
-              Column(
-                children: [
-                  loading
-                      ? const CircularProgressIndicator()
-                      : Autocomplete<String>(
-                          optionsBuilder: (TextEditingValue textEditingValue) {
-                            if (textEditingValue.text == '') {
-                              return const Iterable<String>.empty();
-                            }
-                            return empresas.where((String option) {
-                              return option.toLowerCase().contains(
-                                textEditingValue.text.toLowerCase(),
-                              );
-                            });
-                          },
-                          onSelected: (String selection) async {
-                            setState(() {
-                              seleccionada = selection;
-                              precioCompra = rangosEmpresas[selection]![0];
-                              earningsFecha = null;
-                              isETF = false;
-                            });
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : Autocomplete<String>(
+                            optionsBuilder:
+                                (TextEditingValue textEditingValue) {
+                                  if (textEditingValue.text == '') {
+                                    return const Iterable<String>.empty();
+                                  }
+                                  return empresas.where((String option) {
+                                    return option.toLowerCase().contains(
+                                      textEditingValue.text.toLowerCase(),
+                                    );
+                                  });
+                                },
+                            onSelected: (String selection) async {
+                              setState(() {
+                                seleccionada = selection;
+                                precioCompra = rangosEmpresas[selection]![0];
+                                earningsFecha = null;
+                                isETF = false;
+                              });
 
-                            final result = await obtenerEarnings(selection);
+                              final result = await obtenerEarnings(selection);
 
-                            setState(() {
-                              earningsFecha = result["date"];
-                              isETF = result["isETF"];
-                            });
-                          },
-                          fieldViewBuilder:
-                              (
-                                context,
-                                controller,
-                                focusNode,
-                                onEditingComplete,
-                              ) {
-                                return TextField(
-                                  controller: controller,
-                                  focusNode: focusNode,
-                                  decoration: const InputDecoration(
-                                    labelText: "Search Tickers...",
-                                    border: OutlineInputBorder(),
+                              setState(() {
+                                earningsFecha = result["date"];
+                                isETF = result["isETF"];
+                              });
+                            },
+                            fieldViewBuilder:
+                                (
+                                  context,
+                                  controller,
+                                  focusNode,
+                                  onEditingComplete,
+                                ) {
+                                  final isDark =
+                                      Theme.of(context).brightness ==
+                                      Brightness.dark;
+
+                                  return TextField(
+                                    controller: controller,
+                                    focusNode: focusNode,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black,
+                                    ),
+                                    cursorColor: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    decoration: InputDecoration(
+                                      hintText: "Search Tickers...",
+                                      hintStyle: TextStyle(
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black45,
+                                      ),
+                                      prefixIcon: Icon(
+                                        Icons.search,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
+                                      ),
+                                      filled: true,
+                                      fillColor: isDark
+                                          ? Colors.white.withOpacity(0.08)
+                                          : Colors.black.withOpacity(0.05),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 18,
+                                            horizontal: 20,
+                                          ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(18),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                    ),
+                                  );
+                                },
+                          ),
+
+                    if (seleccionada != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // 🔹 PRICE RANGE (1 línea)
+                            Text(
+                              "Price Range: "
+                              "\$${(rangosEmpresas[seleccionada]![0] * 100).toStringAsFixed(2)}"
+                              " - "
+                              "\$${(rangosEmpresas[seleccionada]![1] * 100).toStringAsFixed(2)}",
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // 🔹 EARNINGS (1 línea)
+                            Builder(
+                              builder: (context) {
+                                Color color = Colors.grey;
+                                String displayText = "";
+
+                                if (isETF) {
+                                  displayText = "No Earnings";
+                                } else if (earningsFecha != null) {
+                                  final now = DateTime.now();
+
+                                  if (earningsFecha!.isBefore(
+                                    DateTime(now.year, now.month, now.day),
+                                  )) {
+                                    displayText =
+                                        "Earnings Passed: "
+                                        "${earningsFecha!.month.toString().padLeft(2, '0')}/"
+                                        "${earningsFecha!.day.toString().padLeft(2, '0')}/"
+                                        "${earningsFecha!.year}";
+                                    color = Colors.grey;
+                                  } else {
+                                    final difference = earningsFecha!
+                                        .difference(now)
+                                        .inDays;
+
+                                    displayText =
+                                        "Next Earnings: "
+                                        "${earningsFecha!.month.toString().padLeft(2, '0')}/"
+                                        "${earningsFecha!.day.toString().padLeft(2, '0')}/"
+                                        "${earningsFecha!.year} • $difference days";
+
+                                    if (difference < 7) {
+                                      color = Colors.red;
+                                    } else if (difference < 30) {
+                                      color = Colors.orange;
+                                    } else {
+                                      color = Colors.green;
+                                    }
+                                  }
+                                } else {
+                                  displayText = "Earnings Passed";
+                                  color = Colors.grey;
+                                }
+
+                                return Text(
+                                  displayText,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: color,
                                   ),
                                 );
                               },
-                        ),
-                  if (seleccionada != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Text(
-                        "Price Range: "
-                        "\$${(rangosEmpresas[seleccionada]![0] * 100).toStringAsFixed(2)} - "
-                        "\$${(rangosEmpresas[seleccionada]![1] * 100).toStringAsFixed(2)}",
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  if (seleccionada != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Builder(
-                        builder: (context) {
-                          Color color = Colors.grey;
-                          String displayText = "";
-
-                          if (isETF) {
-                            displayText = "No Earnings";
-                          } else if (earningsFecha != null) {
-                            final now = DateTime.now();
-
-                            if (earningsFecha!.isBefore(
-                              DateTime(now.year, now.month, now.day),
-                            )) {
-                              displayText =
-                                  "Earnings passed: ${earningsFecha!.month.toString().padLeft(2, '0')}/"
-                                  "${earningsFecha!.day.toString().padLeft(2, '0')}/"
-                                  "${earningsFecha!.year}";
-                              color = Colors.grey;
-                            } else {
-                              final difference = earningsFecha!
-                                  .difference(now)
-                                  .inDays;
-                              displayText =
-                                  "Earnings: ${earningsFecha!.month.toString().padLeft(2, '0')}/"
-                                  "${earningsFecha!.day.toString().padLeft(2, '0')}/"
-                                  "${earningsFecha!.year} ($difference days)";
-
-                              if (difference < 7)
-                                color = Colors.red;
-                              else if (difference < 30)
-                                color = Colors.orange;
-                              else
-                                color = Colors.green;
-                            }
-                          } else {
-                            displayText = "Earnings passed";
-                            color = Colors.grey;
-                          }
-
-                          return Text(
-                            displayText,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: color,
                             ),
-                          );
-                        },
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
 
