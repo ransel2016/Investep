@@ -32,6 +32,11 @@
 		<false/>
 		<key>UISceneConfigurations</key>
 		<dict>
+		<key>NSAppTransportSecurity</key>
+           <dict>
+              <key>NSAllowsArbitraryLoads</key>
+              <true/>
+           </dict>
 			<key>UIWindowSceneSessionRoleApplication</key>
 			<array>
 				<dict>
