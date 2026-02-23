@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:csv/csv.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:html/parser.dart' show parse;
 
 void main() {
   runApp(const ProCalculatorApp());
@@ -61,7 +62,7 @@ class CalculatorPage extends StatefulWidget {
 class _CalculatorPageState extends State<CalculatorPage> {
   List<String> empresas = [];
   String? seleccionada;
-  String earningsTexto = "";
+  String? earningsTexto;
   int? earningsDays;
   DateTime? earningsFecha;
   bool isETF = false;
@@ -95,6 +96,38 @@ class _CalculatorPageState extends State<CalculatorPage> {
   void initState() {
     super.initState();
     loadEmpresas();
+  }
+  
+
+  Future<String?> fetchOptionslamEarningsText(String ticker) async {
+    try {
+      final url =
+          "https://www.optionslam.com/earnings/stocks/${ticker.toUpperCase()}";
+
+      final response = await http.get(Uri.parse(url));
+      print(response);
+      if (response.statusCode == 200) {
+        final document = parse(response.body);
+        final text = document.body?.text ?? "";
+
+        // 🔎 Regex para capturar: April 30, 2026
+        final regex = RegExp(
+          r"Next Earnings Date:.*?([A-Za-z]+ \d{1,2}, \d{4})",
+          caseSensitive: false,
+        );
+
+        final match = regex.firstMatch(text);
+
+        if (match != null) {
+          // Solo extraemos el texto tal cual aparece
+          return match.group(1)!; // Ej: "April 30, 2026"
+        }
+      }
+    } catch (e) {
+      print("Error fetching Optionslam earnings: $e");
+    }
+
+    return null;
   }
 
   Future<Map<String, dynamic>> obtenerEarnings(String ticker) async {
@@ -570,12 +603,13 @@ class _CalculatorPageState extends State<CalculatorPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // 🔹 Autocomplete o CircularProgress
                     loading
                         ? const Center(child: CircularProgressIndicator())
                         : Autocomplete<String>(
                             optionsBuilder:
                                 (TextEditingValue textEditingValue) {
-                                  if (textEditingValue.text == '') {
+                                  if (textEditingValue.text.isEmpty) {
                                     return const Iterable<String>.empty();
                                   }
                                   return empresas.where((String option) {
@@ -588,22 +622,58 @@ class _CalculatorPageState extends State<CalculatorPage> {
                               setState(() {
                                 seleccionada = selection;
                                 precioCompra = rangosEmpresas[selection]![0];
-                                earningsFecha = null;
                                 isETF = false;
+                                earningsTexto = null; // limpiar antes de traer
                               });
 
-                              final result = await obtenerEarnings(selection);
+                              final text = await fetchOptionslamEarningsText(
+                                selection,
+                              );
 
                               setState(() {
-                                earningsFecha = result["date"];
-                                isETF = result["isETF"];
+                                earningsTexto =
+                                    text; // mostrar tal cual, ejemplo: "April 30, 2026"
                               });
                             },
+                            fieldViewBuilder:
+                                (
+                                  context,
+                                  controller,
+                                  focusNode,
+                                  onEditingComplete,
+                                ) {
+                                  final isDark =
+                                      Theme.of(context).brightness ==
+                                      Brightness.dark;
+                                  return TextField(
+                                    controller: controller,
+                                    focusNode: focusNode,
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black,
+                                    ),
+                                    decoration: InputDecoration(
+                                      labelText: "Search Tickers...",
+                                      labelStyle: TextStyle(
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black54,
+                                      ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      filled: true,
+                                      fillColor: isDark
+                                          ? const Color(0xFF2C2C2C)
+                                          : Colors.white,
+                                    ),
+                                  );
+                                },
                             optionsViewBuilder: (context, onSelected, options) {
                               final isDark =
                                   Theme.of(context).brightness ==
                                   Brightness.dark;
-
                               return Align(
                                 alignment: Alignment.topLeft,
                                 child: Material(
@@ -647,7 +717,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                                   MainAxisAlignment
                                                       .spaceBetween,
                                               children: [
-                                                // 🔹 TICKER
                                                 Text(
                                                   option,
                                                   style: const TextStyle(
@@ -655,8 +724,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
-
-                                                // 🔹 RANGO DE PRECIO
                                                 if (rango != null)
                                                   Text(
                                                     "\$${(rango[0] * 100).toStringAsFixed(2)}"
@@ -681,13 +748,13 @@ class _CalculatorPageState extends State<CalculatorPage> {
                             },
                           ),
 
+                    // 🔹 Price Range y Earnings debajo
                     if (seleccionada != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 18),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            // 🔹 PRICE RANGE (1 línea)
                             Text(
                               "Price Range: "
                               "\$${(rangosEmpresas[seleccionada]![0] * 100).toStringAsFixed(2)}"
@@ -699,10 +766,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-
                             const SizedBox(height: 8),
-
-                            // 🔹 EARNINGS (1 línea)
                             Builder(
                               builder: (context) {
                                 Color color = Colors.grey;
@@ -710,39 +774,12 @@ class _CalculatorPageState extends State<CalculatorPage> {
 
                                 if (isETF) {
                                   displayText = "No Earnings";
-                                } else if (earningsFecha != null) {
-                                  final now = DateTime.now();
-
-                                  if (earningsFecha!.isBefore(
-                                    DateTime(now.year, now.month, now.day),
-                                  )) {
-                                    displayText =
-                                        "Earnings Passed: "
-                                        "${earningsFecha!.month.toString().padLeft(2, '0')}/"
-                                        "${earningsFecha!.day.toString().padLeft(2, '0')}/"
-                                        "${earningsFecha!.year}";
-                                    color = Colors.grey;
-                                  } else {
-                                    final difference = earningsFecha!
-                                        .difference(now)
-                                        .inDays;
-
-                                    displayText =
-                                        "Next Earnings: "
-                                        "${earningsFecha!.month.toString().padLeft(2, '0')}/"
-                                        "${earningsFecha!.day.toString().padLeft(2, '0')}/"
-                                        "${earningsFecha!.year} • $difference days";
-
-                                    if (difference < 7) {
-                                      color = Colors.red;
-                                    } else if (difference < 30) {
-                                      color = Colors.orange;
-                                    } else {
-                                      color = Colors.green;
-                                    }
-                                  }
+                                } else if (earningsTexto != null &&
+                                    earningsTexto!.isNotEmpty) {
+                                  displayText = "Next Earnings: $earningsTexto";
+                                  color = Colors.blueAccent;
                                 } else {
-                                  displayText = "Earnings Passed";
+                                  displayText = "Earnings not available";
                                   color = Colors.grey;
                                 }
 
@@ -773,7 +810,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
               value: precioCompra,
               min: seleccionada != null
                   ? rangosEmpresas[seleccionada]![0]
-                  : 0.01, // 🔹 valor inicial mínimo
+                  : 0.01,
               max: seleccionada != null
                   ? rangosEmpresas[seleccionada]![1]
                   : 10.0,
