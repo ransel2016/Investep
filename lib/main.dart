@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:csv/csv.dart';
+import 'dart:convert';
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(const ProCalculatorApp());
@@ -55,39 +59,27 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class _CalculatorPageState extends State<CalculatorPage> {
-  // ----- Tickers y rangos -----
-  final Map<String, List<double>> tickers = {
-    "AMZN": [0.65, 1.30],
-    "AAPL": [0.45, 0.95],
-    "GOOG": [0.60, 1.40],
-    "META": [0.50, 1.70],
-    "MSFT": [0.70, 1.55],
-    "NFLX": [0.55, 0.85],
-    "TSLA": [2.20, 3.60],
-    "AMD": [0.65, 1.40],
-    "NVDA": [0.80, 1.70],
-    "QQQ": [0.30, 0.60],
-    "SPY": [0.30, 0.45],
-    "CCL": [0.25, 0.45],
-    "RCL": [0.80, 1.40],
-  };
-
-  String selectedTicker = "AMZN";
+  List<String> empresas = [];
+  String? seleccionada;
+  String earningsTexto = "";
+  int? earningsDays;
+  DateTime? earningsFecha;
+  bool isETF = false;
+  bool loading = true;
 
   // ----- VALORES INICIALES -----
   final double initialComision = 0.65;
   final double initialGananciaPorc = 0.10;
   final double initialStopPorc = 0.20;
   final int initialContratos = 1;
+  final int multiplicador = 100;
 
   // ----- VARIABLES DINÁMICAS -----
-  double precioCompra = 0.65; // inicializa con el mínimo de AMZN
+  double precioCompra = 0.01;
   int contratos = 1;
   double comision = 0.65;
   double gananciaPorc = 0.10;
   double stopPorc = 0.20;
-
-  final int multiplicador = 100;
 
   double precioVenta = 0;
   double gananciaNeta = 0;
@@ -99,28 +91,188 @@ class _CalculatorPageState extends State<CalculatorPage> {
   bool disableProfitTarget = true;
   bool disableStopLoss = true;
 
+  @override
+  void initState() {
+    super.initState();
+    loadEmpresas();
+  }
+
+  Future<Map<String, dynamic>> obtenerEarnings(String ticker) async {
+    const apiKey = "d6dn8k1r01qm89pk89ogd6dn8k1r01qm89pk89p0";
+
+    try {
+      final url = Uri.parse(
+        "https://finnhub.io/api/v1/calendar/earnings?symbol=$ticker&token=$apiKey",
+      );
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        final calendar = data["earningsCalendar"];
+
+        if (calendar != null && calendar.isNotEmpty) {
+          // 🔎 Buscar la próxima fecha futura
+          for (var item in calendar) {
+            final fechaStr = item["date"]; // string tipo "2026-02-05"
+            if (fechaStr != null) {
+              final fechaEarnings = DateTime.tryParse(fechaStr);
+              if (fechaEarnings != null) {
+                // Retorna la primera fecha que aún no pasó
+                if (!fechaEarnings.isBefore(DateTime.now())) {
+                  return {"date": fechaEarnings, "isETF": false};
+                }
+              }
+            }
+          }
+
+          // ⚠️ Si todas las fechas ya pasaron
+          final lastItem = calendar.last;
+          final lastDate = DateTime.tryParse(lastItem["date"] ?? "");
+          return {
+            "date": lastDate, // Fecha pasada
+            "isETF": false,
+          };
+        } else {
+          // No hay earnings → probablemente ETF
+          return {"date": null, "isETF": true};
+        }
+      } else {
+        print("Error HTTP: ${response.statusCode}");
+        return {"date": null, "isETF": false};
+      }
+    } catch (e) {
+      print("Error loading earnings: $e");
+      return {"date": null, "isETF": false};
+    }
+  }
+
+  Map<String, List<double>> rangosEmpresas = {};
+
+  Future<void> loadEmpresas() async {
+    final url =
+        'https://docs.google.com/spreadsheets/d/1JH-nYSubRs6eznGMjl-gjCE3P6NEo_utrI2zPDci1LM/export?format=csv&gid=0';
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        List<List<dynamic>> rows = const CsvToListConverter().convert(
+          response.body,
+        );
+
+        List<String> loaded = [];
+
+        for (int i = 1; i < rows.length; i++) {
+          if (rows[i].length > 2) {
+            var numero = rows[i][0];
+            var ticker = rows[i][1];
+            var rango = rows[i][2];
+
+            bool numeroValido =
+                numero != null &&
+                numero.toString().trim().isNotEmpty &&
+                int.tryParse(numero.toString()) != null;
+
+            if (numeroValido) {
+              String t = ticker.toString().trim();
+              String r = rango.toString().trim();
+
+              if (t.isNotEmpty) {
+                loaded.add(t);
+
+                String limpio = r
+                    .replaceAll('[', '')
+                    .replaceAll(']', '')
+                    .replaceAll('\$', '')
+                    .trim();
+
+                List<String> partes = limpio.split('-');
+
+                if (partes.length == 2) {
+                  double? minRango = double.tryParse(partes[0].trim());
+                  double? maxRango = double.tryParse(partes[1].trim());
+
+                  if (minRango != null && maxRango != null) {
+                    minRango = minRango / 100;
+                    maxRango = maxRango / 100;
+
+                    rangosEmpresas[t] = [minRango, maxRango];
+
+                    // 🔥 SI ESTA EMPRESA YA ESTA SELECCIONADA
+                    // actualizar automaticamente precioCompra
+                    if (seleccionada == t) {
+                      precioCompra = minRango;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        setState(() {
+          empresas = loaded;
+          loading = false;
+        });
+      } else {
+        print("Error HTTP: ${response.statusCode}");
+        setState(() => loading = false);
+      }
+    } catch (e) {
+      print("Error: $e");
+      setState(() => loading = false);
+    }
+  }
+
   void calcular() {
+    // 🔹 Valor total de la compra
     double valorTotal = precioCompra * multiplicador * contratos;
+
+    // 🔹 Comisiones totales (ida y vuelta)
     double comisionesTotales = comision * contratos * 2;
 
-    // Precio de venta
-    double precioVentaExacto =
-        (valorTotal + comisionesTotales) * (1 + gananciaPorc) / (contratos * multiplicador);
-    precioVenta = (precioVentaExacto * 100).ceilToDouble() / 100;
+    // 🔹 Precio de venta
+    precioVenta =
+        ((valorTotal + comisionesTotales) *
+                (1 + gananciaPorc) /
+                (contratos * multiplicador) *
+                100)
+            .ceilToDouble() /
+        100;
 
-    // Stop Loss
+    // 🔹 Stop price
     stopPrice = (precioCompra * (1 - stopPorc) * 100).ceilToDouble() / 100;
 
-    // Ganancia neta real
+    // 🔹 Ganancia neta
     double ventaReal = precioVenta * contratos * multiplicador;
     gananciaNeta = ventaReal - valorTotal - comisionesTotales;
 
-    // Pérdida neta si se llega al stop
+    // 🔹 Pérdida neta
     double stopReal = stopPrice * contratos * multiplicador;
     perdidaNeta = valorTotal - stopReal + comisionesTotales;
   }
 
-  // ----- GLASS CARD -----
+  void resetValues() {
+    setState(() {
+      // 🔹 Precio de compra
+      if (seleccionada != null && rangosEmpresas.containsKey(seleccionada)) {
+        precioCompra = rangosEmpresas[seleccionada]![0]; // mínimo del rango
+      } else {
+        precioCompra = 0.01; // valor por defecto si no hay ticker
+      }
+      contratos = initialContratos;
+      comision = initialComision;
+      gananciaPorc = initialGananciaPorc;
+      stopPorc = initialStopPorc;
+
+      disableCommission = true;
+      disableProfitTarget = true;
+      disableStopLoss = true;
+    });
+  }
+
   Widget glassCard(Widget child) {
     final isDark = widget.darkMode;
     return Container(
@@ -136,13 +288,17 @@ class _CalculatorPageState extends State<CalculatorPage> {
         border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
         boxShadow: isDark
             ? []
-            : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+            : [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                ),
+              ],
       ),
       child: child,
     );
   }
 
-  // ----- SLIDER CONTROL -----
   Widget sliderControl({
     required String label,
     required double value,
@@ -169,7 +325,10 @@ class _CalculatorPageState extends State<CalculatorPage> {
               children: [
                 Text(
                   "$label  $prefix${label == "Quantity:" ? value.toInt() : value.toStringAsFixed(2)}$suffix",
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
@@ -197,7 +356,9 @@ class _CalculatorPageState extends State<CalculatorPage> {
                 Expanded(
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: enabled ? Colors.blueAccent : Colors.grey,
+                      activeTrackColor: enabled
+                          ? Colors.blueAccent
+                          : Colors.grey,
                       inactiveTrackColor: Colors.grey.shade400,
                       thumbColor: enabled ? Colors.blueAccent : Colors.grey,
                     ),
@@ -239,15 +400,16 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
-  // ----- MINI GRAPH -----
   Widget miniGraph() {
     double maxValue = [
       stopPrice,
       precioCompra,
       precioVenta,
       gananciaNeta.abs(),
-      perdidaNeta.abs()
+      perdidaNeta.abs(),
     ].reduce((a, b) => a > b ? a : b);
+
+    if (maxValue <= 0) maxValue = 1; // evita NaN
 
     const double minHeight = 20;
     double getBarHeight(double value) {
@@ -259,8 +421,10 @@ class _CalculatorPageState extends State<CalculatorPage> {
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Price Levels",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text(
+            "Price Levels",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -268,56 +432,71 @@ class _CalculatorPageState extends State<CalculatorPage> {
               Column(
                 children: [
                   Container(
-                      height: getBarHeight(precioCompra),
-                      width: 20,
-                      color: Colors.grey),
+                    height: getBarHeight(precioCompra ?? 0),
+                    width: 20,
+                    color: Colors.grey,
+                  ),
                   const SizedBox(height: 4),
-                  Text("Buy\n\$${precioCompra.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
+                  Text(
+                    "Buy\n\$${(precioCompra ?? 0).toStringAsFixed(2)}",
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
               Column(
                 children: [
                   Container(
-                      height: getBarHeight(precioVenta),
-                      width: 20,
-                      color: Colors.blueAccent),
+                    height: getBarHeight(precioVenta),
+                    width: 20,
+                    color: Colors.blueAccent,
+                  ),
                   const SizedBox(height: 4),
-                  Text("Sale\n\$${precioVenta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
+                  Text(
+                    "Sale\n\$${precioVenta.toStringAsFixed(2)}",
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
               Column(
                 children: [
                   Container(
-                      height: getBarHeight(stopPrice),
-                      width: 20,
-                      color: Colors.orangeAccent),
+                    height: getBarHeight(stopPrice),
+                    width: 20,
+                    color: Colors.orangeAccent,
+                  ),
                   const SizedBox(height: 4),
-                  Text("Stop\n\$${stopPrice.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
+                  Text(
+                    "Stop\n\$${stopPrice.toStringAsFixed(2)}",
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
               Column(
                 children: [
                   Container(
-                      height: getBarHeight(gananciaNeta.abs()),
-                      width: 20,
-                      color: Colors.greenAccent),
+                    height: getBarHeight(gananciaNeta.abs()),
+                    width: 20,
+                    color: Colors.greenAccent,
+                  ),
                   const SizedBox(height: 4),
-                  Text("Profit\n\$${gananciaNeta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
+                  Text(
+                    "Profit\n\$${gananciaNeta.toStringAsFixed(2)}",
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
               Column(
                 children: [
                   Container(
-                      height: getBarHeight(perdidaNeta.abs()),
-                      width: 20,
-                      color: Colors.redAccent),
+                    height: getBarHeight(perdidaNeta.abs()),
+                    width: 20,
+                    color: Colors.redAccent,
+                  ),
                   const SizedBox(height: 4),
-                  Text("Loss\n-\$${perdidaNeta.toStringAsFixed(2)}",
-                      textAlign: TextAlign.center),
+                  Text(
+                    "Loss\n-\$${perdidaNeta.toStringAsFixed(2)}",
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             ],
@@ -327,7 +506,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
     );
   }
 
-  // ----- ANIMATED RESULT -----
   Widget animatedResult(String label, String value, Color color) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
@@ -343,38 +521,30 @@ class _CalculatorPageState extends State<CalculatorPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(fontSize: 18)),
-          Text(value,
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // ----- RESET FUNCTION -----
-  void resetValues() {
-    setState(() {
-      // Reset sliders al inicio
-      precioCompra = tickers[selectedTicker]![0]; // al mínimo del ticker
-      contratos = initialContratos;
-      comision = initialComision;
-      gananciaPorc = initialGananciaPorc;
-      stopPorc = initialStopPorc;
-
-      disableCommission = true;
-      disableProfitTarget = true;
-      disableStopLoss = true;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    // 🔹 Calculamos siempre usando el precio actual
     calcular();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Options Calculator",
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Options Calculator",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -393,98 +563,134 @@ class _CalculatorPageState extends State<CalculatorPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // ---------- BOTÓN TICKERS ESTILIZADO ----------
+            // ---------- BUSCADOR DE EMPRESAS ----------
             glassCard(
-              GestureDetector(
-                onTap: () async {
-                  String? result = await showModalBottomSheet<String>(
-                    context: context,
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                    ),
-                    builder: (context) {
-                      return Container(
-                        padding: const EdgeInsets.all(16),
-                        height: 400,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              "Select a Ticker",
-                              style: TextStyle(
-                                  fontSize: 20, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: ListView(
-                                children: tickers.keys.map((ticker) {
-                                  return ListTile(
-                                    title: Text(
-                                      ticker,
-                                      style: const TextStyle(fontSize: 18),
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context, ticker);
-                                    },
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
+              Column(
+                children: [
+                  loading
+                      ? const CircularProgressIndicator()
+                      : Autocomplete<String>(
+                          optionsBuilder: (TextEditingValue textEditingValue) {
+                            if (textEditingValue.text == '') {
+                              return const Iterable<String>.empty();
+                            }
+                            return empresas.where((String option) {
+                              return option.toLowerCase().contains(
+                                textEditingValue.text.toLowerCase(),
+                              );
+                            });
+                          },
+                          onSelected: (String selection) async {
+                            setState(() {
+                              seleccionada = selection;
+                              precioCompra = rangosEmpresas[selection]![0];
+                              earningsFecha = null;
+                              isETF = false;
+                            });
+
+                            final result = await obtenerEarnings(selection);
+
+                            setState(() {
+                              earningsFecha = result["date"];
+                              isETF = result["isETF"];
+                            });
+                          },
+                          fieldViewBuilder:
+                              (
+                                context,
+                                controller,
+                                focusNode,
+                                onEditingComplete,
+                              ) {
+                                return TextField(
+                                  controller: controller,
+                                  focusNode: focusNode,
+                                  decoration: const InputDecoration(
+                                    labelText: "Buscar empresa...",
+                                    border: OutlineInputBorder(),
+                                  ),
+                                );
+                              },
                         ),
-                      );
-                    },
-                  );
-                  if (result != null) {
-                    setState(() {
-                      selectedTicker = result;
-                      precioCompra = tickers[selectedTicker]![0];
-                    });
-                  }
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    gradient: LinearGradient(
-                      colors: widget.darkMode
-                          ? [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.02)]
-                          : [Colors.blue.shade100, Colors.blue.shade50],
+                  if (seleccionada != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        "Price Range: "
+                        "\$${(rangosEmpresas[seleccionada]![0] * 100).toStringAsFixed(2)} - "
+                        "\$${(rangosEmpresas[seleccionada]![1] * 100).toStringAsFixed(2)}",
+                        style: const TextStyle(fontSize: 16),
+                      ),
                     ),
-                    border: Border.all(
-                        color: widget.darkMode ? Colors.white24 : Colors.blueAccent),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+                  if (seleccionada != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Builder(
+                        builder: (context) {
+                          Color color = Colors.grey;
+                          String displayText = "";
+
+                          if (isETF) {
+                            displayText = "No Earnings";
+                          } else if (earningsFecha != null) {
+                            final now = DateTime.now();
+
+                            if (earningsFecha!.isBefore(
+                              DateTime(now.year, now.month, now.day),
+                            )) {
+                              displayText =
+                                  "Earnings passed: ${earningsFecha!.month.toString().padLeft(2, '0')}/"
+                                  "${earningsFecha!.day.toString().padLeft(2, '0')}/"
+                                  "${earningsFecha!.year}";
+                              color = Colors.grey;
+                            } else {
+                              final difference = earningsFecha!
+                                  .difference(now)
+                                  .inDays;
+                              displayText =
+                                  "Earnings: ${earningsFecha!.month.toString().padLeft(2, '0')}/"
+                                  "${earningsFecha!.day.toString().padLeft(2, '0')}/"
+                                  "${earningsFecha!.year} ($difference days)";
+
+                              if (difference < 7)
+                                color = Colors.red;
+                              else if (difference < 30)
+                                color = Colors.orange;
+                              else
+                                color = Colors.green;
+                            }
+                          } else {
+                            displayText = "Earnings passed";
+                            color = Colors.grey;
+                          }
+
+                          return Text(
+                            displayText,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: color,
+                            ),
+                          );
+                        },
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        selectedTicker,
-                        style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: widget.darkMode ? Colors.white : Colors.black),
-                      ),
-                      const Icon(Icons.arrow_drop_down, size: 30),
-                    ],
-                  ),
-                ),
+                    ),
+                ],
               ),
             ),
+
+            const SizedBox(height: 24),
 
             // ---------- SLIDERS ----------
             sliderControl(
               label: "Trade Price:",
               value: precioCompra,
-              min: tickers[selectedTicker]![0],
-              max: tickers[selectedTicker]![1],
+              min: seleccionada != null
+                  ? rangosEmpresas[seleccionada]![0]
+                  : 0.01, // 🔹 valor inicial mínimo
+              max: seleccionada != null
+                  ? rangosEmpresas[seleccionada]![1]
+                  : 10.0,
               step: 0.01,
               prefix: "\$",
               onChanged: (v) => setState(() => precioCompra = v),
@@ -534,9 +740,13 @@ class _CalculatorPageState extends State<CalculatorPage> {
             ),
 
             const SizedBox(height: 24),
+
+            // ---------- MINI GRAPH ----------
             miniGraph(),
 
             const SizedBox(height: 24),
+
+            // ---------- RESULTADOS ANIMADOS ----------
             animatedResult(
               "Sale Price",
               "\$${precioVenta.toStringAsFixed(2)}",
@@ -550,18 +760,16 @@ class _CalculatorPageState extends State<CalculatorPage> {
             animatedResult(
               "Net Profit",
               "\$${gananciaNeta.toStringAsFixed(2)}",
-              gananciaNeta >= 0 ? Colors.greenAccent : Colors.redAccent,
+              gananciaNeta >= 0
+                  ? const Color.fromARGB(255, 4, 139, 74)
+                  : Colors.redAccent,
             ),
             animatedResult(
               "Possible Loss",
               "-\$${perdidaNeta.toStringAsFixed(2)}",
               Colors.redAccent,
             ),
-            animatedResult(
-              "Percentage",
-              "${(gananciaPorc * 100).toStringAsFixed(2)}%",
-              gananciaNeta >= 0 ? Colors.greenAccent : Colors.redAccent,
-            ),
+
             const SizedBox(height: 12),
             const Text("Designed by: Ransel Ramos"),
             const Text("KEEP IT SIMPLE"),
