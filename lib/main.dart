@@ -4,6 +4,7 @@ import 'package:csv/csv.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:html/parser.dart' show parse;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const ProCalculatorApp());
@@ -67,6 +68,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
   DateTime? earningsFecha;
   bool isETF = false;
   bool loading = true;
+  String? companyName;
 
   // ----- VALORES INICIALES -----
   final double initialComision = 0.65;
@@ -97,88 +99,118 @@ class _CalculatorPageState extends State<CalculatorPage> {
     super.initState();
     loadEmpresas();
   }
-  
 
-  Future<String?> fetchOptionslamEarningsText(String ticker) async {
+  Future<Map<String, String>?> fetchEarningsDate(String ticker) async {
     try {
       final url =
-          "https://www.optionslam.com/earnings/stocks/${ticker.toUpperCase()}";
+          "https://api.earningsapi.com/v1/earnings?symbol=${ticker.toUpperCase()}&apikey=lysmvjQgf6fgiADlLJLr";
 
       final response = await http.get(Uri.parse(url));
-      print(response);
+
       if (response.statusCode == 200) {
-        final document = parse(response.body);
-        final text = document.body?.text ?? "";
+        final List data = json.decode(response.body);
 
-        // 🔎 Regex para capturar: April 30, 2026
-        final regex = RegExp(
-          r"Next Earnings Date:.*?([A-Za-z]+ \d{1,2}, \d{4})",
-          caseSensitive: false,
-        );
+        if (data.length < 2) return null;
 
-        final match = regex.firstMatch(text);
+        final today = DateTime.now();
 
-        if (match != null) {
-          // Solo extraemos el texto tal cual aparece
-          return match.group(1)!; // Ej: "April 30, 2026"
+        final first = data[0];
+        final second = data[1];
+
+        Map<String, dynamic> selected = first;
+
+        final secondDate = DateTime.parse(second["date"]);
+
+        // 🔹 Lógica de selección
+        if (secondDate.year == today.year &&
+            secondDate.month == today.month &&
+            secondDate.day >= today.day) {
+          selected = second;
         }
+
+        final selectedDate = DateTime.parse(selected["date"]);
+        final formatted =
+            "${_monthName(selectedDate.month)} ${selectedDate.day}, ${selectedDate.year}";
+
+        final isConfirmed =
+            selected["time"] != null && selected["time"].toString().isNotEmpty;
+
+        return {
+          "company": selected["name"] ?? ticker,
+          "earningText": isConfirmed
+              ? "Next Earnings - $formatted"
+              : "Estimated Earnings - $formatted",
+        };
       }
     } catch (e) {
-      print("Error fetching Optionslam earnings: $e");
+      print("Error fetching EarningsAPI: $e");
     }
 
     return null;
   }
 
-  Future<Map<String, dynamic>> obtenerEarnings(String ticker) async {
-    const apiKey = "d6dn8k1r01qm89pk89ogd6dn8k1r01qm89pk89p0";
+  String _monthName(int month) {
+    const months = [
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return months[month];
+  }
 
-    try {
-      final url = Uri.parse(
-        "https://finnhub.io/api/v1/calendar/earnings?symbol=$ticker&token=$apiKey",
-      );
+  Future<Map<String, String>> getWeeklyCachedEarnings(String ticker) async {
+    final prefs = await SharedPreferences.getInstance();
+    final earningKey = "earning_$ticker";
+    final dateKey = "earning_last_update_$ticker";
 
-      final response = await http.get(url);
+    final now = DateTime.now();
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+    String? cachedJson = prefs.getString(earningKey);
+    final lastUpdateString = prefs.getString(dateKey);
 
-        final calendar = data["earningsCalendar"];
+    bool shouldUpdate = true;
 
-        if (calendar != null && calendar.isNotEmpty) {
-          // 🔎 Buscar la próxima fecha futura
-          for (var item in calendar) {
-            final fechaStr = item["date"]; // string tipo "2026-02-05"
-            if (fechaStr != null) {
-              final fechaEarnings = DateTime.tryParse(fechaStr);
-              if (fechaEarnings != null) {
-                // Retorna la primera fecha que aún no pasó
-                if (!fechaEarnings.isBefore(DateTime.now())) {
-                  return {"date": fechaEarnings, "isETF": false};
-                }
-              }
-            }
-          }
-
-          // ⚠️ Si todas las fechas ya pasaron
-          final lastItem = calendar.last;
-          final lastDate = DateTime.tryParse(lastItem["date"] ?? "");
-          return {
-            "date": lastDate, // Fecha pasada
-            "isETF": false,
-          };
-        } else {
-          // No hay earnings → probablemente ETF
-          return {"date": null, "isETF": true};
-        }
-      } else {
-        print("Error HTTP: ${response.statusCode}");
-        return {"date": null, "isETF": false};
+    if (lastUpdateString != null) {
+      final lastUpdate = DateTime.parse(lastUpdateString);
+      final daysPassed = now.difference(lastUpdate).inDays;
+      if (daysPassed < 7) {
+        shouldUpdate = false; // aún no pasó una semana
       }
-    } catch (e) {
-      print("Error loading earnings: $e");
-      return {"date": null, "isETF": false};
     }
+
+    // Mostrar cache inmediato
+    Map<String, String> display = cachedJson != null
+        ? Map<String, String>.from(json.decode(cachedJson))
+        : {"company": ticker, "earningText": "Loading..."};
+
+    // Actualizar en background si ya pasó 1 semana
+    if (shouldUpdate) {
+      fetchEarningsDate(ticker).then((fresh) async {
+        if (fresh != null) {
+          await prefs.setString(earningKey, json.encode(fresh));
+          await prefs.setString(dateKey, now.toIso8601String());
+
+          if (ticker == seleccionada) {
+            setState(() {
+              earningsTexto = fresh["earningText"];
+              companyName = fresh["company"];
+            });
+          }
+        }
+      });
+    }
+
+    return display;
   }
 
   Map<String, List<double>> rangosEmpresas = {};
@@ -624,15 +656,16 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                 precioCompra = rangosEmpresas[selection]![0];
                                 isETF = false;
                                 earningsTexto = null; // limpiar antes de traer
+                                companyName = null;
                               });
 
-                              final text = await fetchOptionslamEarningsText(
+                              final data = await getWeeklyCachedEarnings(
                                 selection,
                               );
 
                               setState(() {
-                                earningsTexto =
-                                    text; // mostrar tal cual, ejemplo: "April 30, 2026"
+                                earningsTexto = data["earningText"];
+                                companyName = data["company"];
                               });
                             },
                             fieldViewBuilder:
@@ -755,6 +788,16 @@ class _CalculatorPageState extends State<CalculatorPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
+                            if (companyName != null)
+                              Text(
+                                companyName!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            const SizedBox(height: 4),
                             Text(
                               "Price Range: "
                               "\$${(rangosEmpresas[seleccionada]![0] * 100).toStringAsFixed(2)}"
@@ -774,10 +817,22 @@ class _CalculatorPageState extends State<CalculatorPage> {
 
                                 if (isETF) {
                                   displayText = "No Earnings";
+                                  color = Colors.grey;
                                 } else if (earningsTexto != null &&
                                     earningsTexto!.isNotEmpty) {
-                                  displayText = "Next Earnings: $earningsTexto";
-                                  color = Colors.blueAccent;
+                                  displayText = earningsTexto!;
+
+                                  if (earningsTexto!.startsWith(
+                                    "Next Earnings",
+                                  )) {
+                                    color = Colors.blueAccent; // 🔵 Confirmado
+                                  } else if (earningsTexto!.startsWith(
+                                    "Estimated Earnings",
+                                  )) {
+                                    color = Colors.orangeAccent; // 🟠 Estimado
+                                  } else {
+                                    color = Colors.grey;
+                                  }
                                 } else {
                                   displayText = "Earnings not available";
                                   color = Colors.grey;
