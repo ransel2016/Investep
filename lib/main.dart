@@ -278,7 +278,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
           "headline": item["headline"]?.toString() ?? "",
           "source": item["source"]?.toString() ?? "",
           "url": item["url"]?.toString() ?? "",
-          "image": item["image"]?.toString() ?? "",
           "date":
               "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
           "time":
@@ -1288,25 +1287,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        if ((item["image"] ?? "").isNotEmpty)
-                                          ClipRRect(
-                                            borderRadius:
-                                                const BorderRadius.vertical(
-                                                  top: Radius.circular(18),
-                                                ),
-                                            child: Image.network(
-                                              item["image"]!,
-                                              height: 160,
-                                              width: double.infinity,
-                                              fit: BoxFit.cover,
-                                              errorBuilder:
-                                                  (
-                                                    context,
-                                                    error,
-                                                    stackTrace,
-                                                  ) => const SizedBox(),
-                                            ),
-                                          ),
+                                      
                                         Padding(
                                           padding: const EdgeInsets.all(16),
                                           child: Column(
