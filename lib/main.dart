@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const ProCalculatorApp());
@@ -71,6 +72,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
   bool isETF = false;
   bool loading = true;
   String? companyName;
+  List<Map<String, String>> companyNews = [];
 
   // ----- VALORES INICIALES -----
   final double initialComision = 0.65;
@@ -145,6 +147,13 @@ class _CalculatorPageState extends State<CalculatorPage> {
     return "N/A";
   }
 
+  Future<void> openNews(String url) async {
+    final Uri uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   Future<Map<String, String>?> fetchEarningsDate(String ticker) async {
     try {
       final url =
@@ -213,44 +222,162 @@ class _CalculatorPageState extends State<CalculatorPage> {
     return months[month];
   }
 
-  Future<Map<String, String>> getWeeklyCachedEarnings(String ticker) async {
+  // ------------------ Noticias de la compañía ------------------
+  Future<List<Map<String, String>>> fetchCompanyNews(
+    String ticker,
+    String companyName,
+  ) async {
+    try {
+      final now = DateTime.now();
+      final yesterday = now.subtract(const Duration(hours: 24));
+
+      final url =
+          "https://finnhub.io/api/v1/company-news?symbol=$ticker"
+          "&from=${yesterday.toIso8601String().split('T').first}"
+          "&to=${now.toIso8601String().split('T').first}"
+          "&token=d6dn8k1r01qm89pk89ogd6dn8k1r01qm89pk89p0";
+
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode != 200) return [];
+
+      final List data = json.decode(response.body);
+
+      // 🔹 Filtrar solo noticias últimas 24 horas
+      final filtered = data.where((item) {
+        if (item["datetime"] == null) return false;
+
+        final newsDate = DateTime.fromMillisecondsSinceEpoch(
+          item["datetime"] * 1000,
+        );
+
+        final isRecent = newsDate.isAfter(yesterday);
+
+        final title = (item["headline"] ?? "").toString().toLowerCase();
+        final summary = (item["summary"] ?? "").toString().toLowerCase();
+        final nameLower = companyName.toLowerCase();
+
+        final isRelevant =
+            title.contains(nameLower) || summary.contains(nameLower);
+
+        return isRecent && isRelevant;
+      }).toList();
+
+      // 🔹 Ordenar por más reciente
+      filtered.sort((a, b) => b["datetime"].compareTo(a["datetime"]));
+
+      // 🔹 Tomar máximo 5
+      final top5 = filtered.take(5);
+
+      return top5.map<Map<String, String>>((item) {
+        final date = DateTime.fromMillisecondsSinceEpoch(
+          item["datetime"] * 1000,
+        );
+
+        return {
+          "headline": item["headline"]?.toString() ?? "",
+          "source": item["source"]?.toString() ?? "",
+          "url": item["url"]?.toString() ?? "",
+          "image": item["image"]?.toString() ?? "",
+          "date":
+              "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
+          "time":
+              "${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}",
+        };
+      }).toList();
+    } catch (e) {
+      print("Error fetching 24h news: $e");
+      return [];
+    }
+  }
+
+  // ------------------ Cache semanal de noticias ------------------
+  Future<List<Map<String, String>>> getWeeklyCachedNews(
+    String ticker,
+    String companyName,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
-    final earningKey = "earning_$ticker";
-    final dateKey = "earning_last_update_$ticker";
+    final newsKey = "news_$ticker";
+    final dateKey = "news_last_update_$ticker";
 
     final now = DateTime.now();
-
-    String? cachedJson = prefs.getString(earningKey);
     final lastUpdateString = prefs.getString(dateKey);
 
     bool shouldUpdate = true;
 
     if (lastUpdateString != null) {
       final lastUpdate = DateTime.parse(lastUpdateString);
-      final daysPassed = now.difference(lastUpdate).inDays;
-      if (daysPassed < 7) {
-        shouldUpdate = false; // aún no pasó una semana
+      if (now.difference(lastUpdate).inDays < 7) {
+        shouldUpdate = false;
       }
     }
 
     // Mostrar cache inmediato
+    final cachedString = prefs.getString(newsKey);
+    List<Map<String, String>> display = [];
+    if (cachedString != null) {
+      display = List<Map<String, String>>.from(json.decode(cachedString));
+    }
+
+    // Actualizar en background si ya pasó 1 semana
+    if (shouldUpdate) {
+      fetchCompanyNews(ticker, companyName).then((freshNews) async {
+        if (freshNews.isNotEmpty) {
+          await prefs.setString(newsKey, json.encode(freshNews));
+          await prefs.setString(dateKey, now.toIso8601String());
+          // Actualiza UI si sigue seleccionado
+          if (ticker == seleccionada) {
+            setState(() {
+              companyNews = freshNews;
+            });
+          }
+        }
+      });
+    }
+
+    return display;
+  }
+
+  Future<Map<String, String>> getWeeklyCachedEarnings(String ticker) async {
+    final prefs = await SharedPreferences.getInstance();
+    final earningKey = "earning_$ticker";
+    final dateKey = "earning_last_update_$ticker";
+    final now = DateTime.now();
+
+    // 🔹 Leer cache
+    String? cachedJson = prefs.getString(earningKey);
+    final lastUpdateString = prefs.getString(dateKey);
+
+    bool shouldUpdate = true;
+    if (lastUpdateString != null) {
+      final lastUpdate = DateTime.parse(lastUpdateString);
+      if (now.difference(lastUpdate).inDays < 7) {
+        shouldUpdate = false; // aún no pasó una semana
+      }
+    }
+
+    // 🔹 Mostrar cache inmediato
     Map<String, String> display = cachedJson != null
         ? Map<String, String>.from(json.decode(cachedJson))
         : {"company": ticker, "earningText": "Loading..."};
 
-    // Actualizar en background si ya pasó 1 semana
+    // 🔹 Actualizar en background si ya pasó 1 semana
     if (shouldUpdate) {
       fetchEarningsDate(ticker).then((fresh) async {
-        if (fresh != null) {
-          await prefs.setString(earningKey, json.encode(fresh));
-          await prefs.setString(dateKey, now.toIso8601String());
+        final earningText = fresh?["earningText"] ?? "No Earnings Available";
+        final company = fresh?["company"] ?? ticker;
 
-          if (ticker == seleccionada) {
-            setState(() {
-              earningsTexto = fresh["earningText"];
-              companyName = fresh["company"];
-            });
-          }
+        await prefs.setString(
+          earningKey,
+          json.encode({"company": company, "earningText": earningText}),
+        );
+        await prefs.setString(dateKey, now.toIso8601String());
+
+        if (ticker == seleccionada) {
+          setState(() {
+            earningsTexto = earningText;
+            companyName = company;
+          });
         }
       });
     }
@@ -683,26 +810,31 @@ class _CalculatorPageState extends State<CalculatorPage> {
                   child: Builder(
                     builder: (context) {
                       final theme = Theme.of(context).brightness;
+
+                      // 🔹 Fondo y borde igual que el Autocomplete
+                      final backgroundColor = theme == Brightness.dark
+                          ? const Color(
+                              0xFF2C2C2C,
+                            ) // mismo que Autocomplete oscuro
+                          : Colors.white; // mismo que Autocomplete claro
+                      final borderColor = theme == Brightness.dark
+                          ? Colors.white.withOpacity(0.2)
+                          : Colors.black12;
+
                       return Container(
-                        padding: EdgeInsets.symmetric(
-                          vertical: theme == Brightness.dark ? 12 : 10,
-                          horizontal: theme == Brightness.dark ? 16 : 14,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 16,
                         ),
                         decoration: BoxDecoration(
-                          color: theme == Brightness.dark
-                              ? Colors.white.withOpacity(0.15)
-                              : Colors.black.withOpacity(
-                                  0.05,
-                                ), // fondo más claro en tema claro
+                          color: backgroundColor,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme == Brightness.dark
-                                ? Colors.white.withOpacity(0.2)
-                                : Colors.black12,
-                          ),
+                          border: Border.all(color: borderColor),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: theme == Brightness.dark
+                                  ? Colors.black.withOpacity(0.15)
+                                  : Colors.black12,
                               blurRadius: 8,
                               offset: const Offset(0, 3),
                             ),
@@ -769,17 +901,27 @@ class _CalculatorPageState extends State<CalculatorPage> {
                                 seleccionada = selection;
                                 precioCompra = rangosEmpresas[selection]![0];
                                 isETF = false;
-                                earningsTexto = null; // limpiar antes de traer
-                                companyName = null;
+
+                                earningsTexto = null;
+                                companyNews = [];
                               });
 
-                              final data = await getWeeklyCachedEarnings(
+                              // 🔹 Ahora devuelve Map
+                              final earningMap = await getWeeklyCachedEarnings(
                                 selection,
                               );
 
+                              // 🔹 Extraemos los valores correctos
+                              final news = await fetchCompanyNews(
+                                selection,
+                                earningMap["company"] ?? selection,
+                              );
+
                               setState(() {
-                                earningsTexto = data["earningText"];
-                                companyName = data["company"];
+                                earningsTexto =
+                                    earningMap["earningText"]; // ✅ String
+                                companyName = earningMap["company"]; // ✅ String
+                                companyNews = news; // ✅ Lista
                               });
                             },
                             fieldViewBuilder:
@@ -1061,6 +1203,240 @@ class _CalculatorPageState extends State<CalculatorPage> {
               "-\$${perdidaNeta.toStringAsFixed(2)}",
               Colors.redAccent,
             ),
+            // ------------------ Noticias debajo de Possible Loss ------------------
+            if (seleccionada != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 24),
+                child: Builder(
+                  builder: (context) {
+                    final isDark =
+                        Theme.of(context).brightness == Brightness.dark;
+
+                    if (companyNews.isEmpty) {
+                      return Center(
+                        child: Text(
+                          "No news available (last 24h)",
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      );
+                    }
+
+                    return RefreshIndicator(
+                      onRefresh: () async {
+                        await fetchCompanyNews(
+                          seleccionada!,
+                          seleccionada!,
+                        ); // refresca solo noticias
+                        setState(() {}); // actualiza UI
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Latest News",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          ...companyNews.map((item) {
+                            Color sentimentColor = Colors.grey;
+                            if ((item["sentiment"] ?? "").toLowerCase() ==
+                                "positive") {
+                              sentimentColor = Colors.greenAccent;
+                            } else if ((item["sentiment"] ?? "")
+                                    .toLowerCase() ==
+                                "negative") {
+                              sentimentColor = Colors.redAccent;
+                            }
+
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 400),
+                              curve: Curves.easeInOut,
+                              margin: const EdgeInsets.only(bottom: 18),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(18),
+                                  onTap: () => openNews(item["url"] ?? ""),
+                                  child: Ink(
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? const Color(0xFF1B1B1B)
+                                          : Colors.white,
+                                      borderRadius: BorderRadius.circular(18),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: isDark
+                                              ? Colors.black.withOpacity(0.5)
+                                              : Colors.grey.withOpacity(0.15),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                      border: Border.all(
+                                        color: isDark
+                                            ? Colors.white10
+                                            : Colors.grey.withOpacity(0.2),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        if ((item["image"] ?? "").isNotEmpty)
+                                          ClipRRect(
+                                            borderRadius:
+                                                const BorderRadius.vertical(
+                                                  top: Radius.circular(18),
+                                                ),
+                                            child: Image.network(
+                                              item["image"]!,
+                                              height: 160,
+                                              width: double.infinity,
+                                              fit: BoxFit.cover,
+                                              errorBuilder:
+                                                  (
+                                                    context,
+                                                    error,
+                                                    stackTrace,
+                                                  ) => const SizedBox(),
+                                            ),
+                                          ),
+                                        Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              /// 🔴 Badge + Sentiment
+                                              Row(
+                                                children: [
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 10,
+                                                          vertical: 4,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.redAccent,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            20,
+                                                          ),
+                                                    ),
+                                                    child: const Text(
+                                                      "BREAKING",
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Container(
+                                                    width: 10,
+                                                    height: 10,
+                                                    decoration: BoxDecoration(
+                                                      color: sentimentColor,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 10),
+
+                                              /// 📰 Titular
+                                              Text(
+                                                item["headline"] ?? "",
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w600,
+                                                  height: 1.4,
+                                                  color: isDark
+                                                      ? Colors.white
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+
+                                              /// 🔹 Resumen IA (si lo tienes)
+                                              if ((item["summary"] ?? "")
+                                                  .isNotEmpty)
+                                                Text(
+                                                  item["summary"] ?? "",
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    height: 1.3,
+                                                    color: isDark
+                                                        ? Colors.white60
+                                                        : Colors.black54,
+                                                  ),
+                                                ),
+                                              const SizedBox(height: 12),
+
+                                              /// 📅 Fuente + Fecha + Hora
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.public,
+                                                    size: 14,
+                                                    color: isDark
+                                                        ? Colors.white60
+                                                        : Colors.black54,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    item["source"] ?? "",
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDark
+                                                          ? Colors.white60
+                                                          : Colors.black54,
+                                                    ),
+                                                  ),
+                                                  const Spacer(),
+                                                  Text(
+                                                    "${item["date"]} • ${item["time"]}",
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: isDark
+                                                          ? Colors.white38
+                                                          : Colors.black45,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Icon(
+                                                    Icons.open_in_new,
+                                                    size: 16,
+                                                    color: isDark
+                                                        ? Colors.blueAccent
+                                                        : Colors.blue,
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
 
             const SizedBox(height: 12),
             const Text("Designed by: Ransel Ramos"),
